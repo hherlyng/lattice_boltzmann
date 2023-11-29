@@ -3,18 +3,19 @@ import numpy             as np
 import matplotlib.pyplot as plt
 
 # Constants
-N = 5
+N = 150
 omega = 1.8
 A = 0.05
 beta = 0.5
 Ndir = 9
 k   = 2*np.pi/N # Frequency
 idx = np.arange(Ndir)
-num_timesteps = 100
+num_timesteps = 10000
 
 t_plot   = np.arange(num_timesteps)
 sigma    = np.array([0]*num_timesteps, dtype=np.float64)
 pressure_diff = np.copy(sigma)
+h_quarter = np.copy(sigma)
 
 # D2Q9 directions and weights
 ex = np.array([0, 1, -1, 0, 0, 1, -1, 1, -1])
@@ -33,12 +34,13 @@ Ri   = np.zeros((N, N, Ndir), dtype=np.float64)
 Bi   = np.zeros((N, N, Ndir), dtype=np.float64)
 
 # Red fluid circle in center, blue fluid outside
-Ri[circle,  :] = 1
-Bi[outside, :] = 1
+# Ri[circle,  :] = 1
+# Bi[outside, :] = 1
 
 # Red fluid at bottom, blue fluid on top
-# Ri[np.where(Y >= N/2 + 10*N/150*np.sin(k*X))] = 1.5
-# Bi[np.where(Y < N/2 + 10*N/150*np.sin(k*X))] = 1
+sine_flag = 1
+Ri[np.where(Y >= N/2 + 10*N/150*np.sin(k*X))] = 1
+Bi[np.where(Y < N/2 + 10*N/150*np.sin(k*X))] = 1
 
 # Total population
 Ni = Ri+Bi
@@ -73,22 +75,36 @@ def calc_color_gradient(Ri, Bi):
     fx = np.zeros((N, N), dtype=np.float64)
     fy = np.zeros((N, N), dtype=np.float64)
 
+    sum2_x = np.copy(Ri)
+    sum2_y = np.copy(Bi)
+    # Calculate sum with j as outer, i as inner
+    for j in idx:
+        for i, cx, cy in zip(idx, ex, ey):
+            R_streamed = np.roll(Ri[:, :, j], shift=(cx, cy), axis=(1, 0))
+            B_streamed = np.roll(Bi[:, :, j], shift=(cx, cy), axis=(1, 0))
+            
+            sum2_x[:, :, j] += cx * (R_streamed - B_streamed)
+            sum2_y[:, :, j] += cy * (R_streamed - B_streamed)
+        
+    fx2 = sum2_x.sum(axis=2)
+    fy2 = sum2_y.sum(axis=2)
+
     for i, cx, cy in zip(idx, ex, ey):
 
         R_temp = np.copy(Ri)
         B_temp = np.copy(Bi)
 
         # Red fluid at x + ci
-        R_temp[:, :, i] = np.roll(R_temp[:, :, i], shift=(cx, cy), axis=(1, 0))
+        R_temp = np.roll(R_temp, shift=(cx, cy), axis=(1, 0))
 
         # Blue fluid at x + ci
-        B_temp[:, :, i] = np.roll(B_temp[:, :, i], shift=(cx, cy), axis=(1, 0))
+        B_temp = np.roll(B_temp, shift=(cx, cy), axis=(1, 0))
 
         inner_sum = R_temp.sum(axis=2) - B_temp.sum(axis=2)
-
+        
         fx += cx*inner_sum
         fy += cy*inner_sum
-
+        
     return fx, fy
 
 def antidiffusive_recoloring(Ni_prime, rho, Ri, Bi, cos_phi):
@@ -105,6 +121,40 @@ def antidiffusive_recoloring(Ni_prime, rho, Ri, Bi, cos_phi):
     
     return R_out, B_out
 
+def find_interface(Ri, Bi, quarter=False):
+    
+    if not quarter:
+        interface_y = np.zeros((N, 1))
+        for i in range(N):
+            # from IPython import embed;embed()
+            red_sum  = Ri[:, i, :].sum(axis=1)
+            blue_sum = Bi[:, i, :].sum(axis=1)
+            diff = red_sum - blue_sum
+            int_idx = 0
+            
+            for j in range(len(diff)):
+                if diff[j] < 0 and diff[j+1] > 0:
+                    int_idx = j
+                    break
+            interface_y[i] = Y[int_idx, i]
+        
+        return interface_y
+    else:
+        i = int(N/4)
+        red_sum = Ri[:, i, :].sum(axis=1)
+        blue_sum = Bi[:, i, :].sum(axis=1)
+        diff = red_sum - blue_sum
+        int_idx = 0
+    
+        for j in range(len(diff)):
+            if diff[j] < 0 and diff[j+1] > 0:
+                int_idx = j
+                break
+                
+        return Y[int_idx, i]
+        
+        
+
 Ni_eq      = np.zeros_like(Ni)
 color_term = np.zeros_like(Ni)
 cos_phi    = np.zeros_like(Ni)
@@ -117,6 +167,8 @@ for t in range(num_timesteps):
     rho = np.sum(Ni, axis=2) # Density
     ux  = np.sum(Ni*ex, axis=2) / rho # x velocity
     uy  = np.sum(Ni*ey, axis=2) / rho # y velocity
+    # if t == 0:
+    #     uy = 0.5e-3*np.ones_like(uy)
 
     # Compute color gradient
     fx, fy = calc_color_gradient(Ri, Bi)
@@ -140,7 +192,7 @@ for t in range(num_timesteps):
     
     # Check that sum(Ni_eq) over all directions i equals rho at every lattice site
     assert np.allclose(Ni_eq.sum(axis=2), rho)
-    from IPython import embed;embed()
+    
     # Collision step
     Ni = Ni - omega*(Ni - Ni_eq) + color_term
 
@@ -154,10 +206,10 @@ for t in range(num_timesteps):
             cy_hat = cy / np.sqrt(cx**2+cy**2)
 
         cos_phi[:, :, i] = fx_hat*cx_hat + fy_hat*cy_hat
-    # from IPython import embed;embed(header="first")
+    
     # Antidiffusive recoloring step
     Ri, Bi = antidiffusive_recoloring(Ni_prime=Ni, rho=rho, Ri=Ri, Bi=Bi, cos_phi=cos_phi)
-    # from IPython import embed;embed(header="second")
+    
     # Propagation step
     for i, cx, cy in zip(idx, ex, ey):
         # Red fluid
@@ -168,75 +220,27 @@ for t in range(num_timesteps):
         
     Ni = Ri+Bi
     
-    # Calculate pressure and surface tension
-    P = rho/3
-    idx_center  = int((N-1)/2)
-    idx_outside = 0
-    P_center  = P[idx_center, idx_center]
-    P_outside = P[idx_outside, idx_outside]
-    delta_P = P_center - P_outside
-    dist = np.sqrt((X[idx_outside, idx_outside] - X[idx_center, idx_center])**2 + (Y[idx_outside, idx_outside] - Y[idx_center, idx_center])**2)
-    sigma[t] = delta_P*dist
-    pressure_diff[t] = delta_P
-
-    # P_top    = P[5, int(N/2)]
-    # P_bottom = P[N-5, int(N/2)]
-    # delta_P = P_top - P_bottom
-    # dist = np.sqrt((X[5, int(N/2)] - X[N-5, int(N/2)])**2 + (Y[5, int(N/2)] - Y[N-5, int(N/2)])**2)
-    # sigma[t] = delta_P*dist
-    # pressure_diff[t] = delta_P
     
-    # if t % 1000 == 0:
-    #     P_half = P[int(N/2), :]
-    #     plt.plot(X[int(N/2), :], P_half)
-    #     plt.show()
+    if sine_flag:
+        # Store interface at x = N/4
+        h_quarter[t] = find_interface(Ri, Bi, quarter=True)
 
 
-    # P_plot = P[idx_center, :]
-    # plt.plot(X[idx_center, :], P_plot)
-    # plt.show()
-    #plt.imshow(Ri.sum(axis=2))# make a color map of fixed colors
-    # cmap = matplotlib.colors.ListedColormap(['blue', 'red'])
-    # bounds=[0, 1]
-    # norm = matplotlib.colors.BoundaryNorm(bounds, cmap.N)
-
-    # # tell imshow about color map so that only set colors are used
-    # bool_grid = np.zeros_like(Ri.sum(axis=2))
-    # indices = np.where(np.invert(np.isclose(Ri.sum(axis=2), 0.0)))
-    
-    # bool_grid[indices] = 1
-    # img = plt.imshow(bool_grid, interpolation='nearest', origin='lower',
-    #                     cmap=cmap, norm=norm)
-
-    # # make a color bar
-    # plt.colorbar(img, cmap=cmap, norm=norm, boundaries=bounds, ticks=[0, 1])
-    # res = Ri.sum(axis=2) - Bi.sum(axis=2)
-    # pl  = np.zeros_like(res)
-    # pl[res>0] = 1 # Red
-    # plt.imshow(pl)
-    # plt.show()
-    # from IPython import embed;embed()
-
-    # Create RGB array for plotting
-    # RGB = np.zeros((N, N, 3))
-    # R_summed = Ri.sum(axis=2)
-    # if np.max(R_summed) != 0:
-    #     R_summed = R_summed[:, :]*1.0/np.max(R_summed)
-
-    # B_summed = Bi.sum(axis=2)
-    # max_B = np.max(B_summed)
-    # if np.max(B_summed) != 0:
-    #     B_summed = B_summed[:, :]*1.0/np.max(B_summed)
-    
-    # RGB[:, :, 0] = R_summed
-    # RGB[:, :, 2] = B_summed
-    # # from IPython import embed;embed()
-    # plt.imshow(RGB)
-    # plt.show()
+    else:
+        # Calculate pressure difference over the droplet
+        P = rho/3
+        idx_center  = int((N-1)/2)
+        idx_outside = 0
+        P_center  = P[idx_center, idx_center]
+        P_outside = P[idx_outside, idx_outside]
+        delta_P = P_center - P_outside
+        dist = np.sqrt((X[idx_outside, idx_outside] - X[idx_center, idx_center])**2 + (Y[idx_outside, idx_outside] - Y[idx_center, idx_center])**2)
+        sigma[t] = delta_P*dist
+        pressure_diff[t] = delta_P
 
     # Visualize
     if t in plot_times:
-        # Plot the distribution
+        # Plot the particle distribution
         ax2[plot_idx].set_title(f"Time t = {t}")
 
         # Create RGB array for plotting
@@ -254,28 +258,46 @@ for t in range(num_timesteps):
         RGB[:, :, 2] = B_summed
         im = ax2[plot_idx].imshow(RGB)
 
-        # Plot the centerline pressure
-        P_half = P[int(N/2), :]
-        ax3[plot_idx-1].plot(X[int(N/2), :], P_half, label=f"Time $t={t}$")
-        ax3[plot_idx-1].set_ylabel(r"Pressure $P$")
-        ax3[plot_idx-1].legend()
+        # If sine wave case, plot the interface
+        if sine_flag:
+            h = find_interface(Ri, Bi)
+            ax3[plot_idx-1].plot(X[0, :], h.flatten(), label=f"Time $t={t}$")
+            ax3[plot_idx-1].set_ylabel(r"Interface position $h$")
+            ax3[plot_idx-1].legend()
+
+        # If circle case, plot the centerline pressure
+        else:
+            # Plot the centerline pressure
+            P_half = P[int(N/2), :]
+            ax3[plot_idx-1].plot(X[int(N/2), :], P_half, label=f"Time $t={t}$")
+            ax3[plot_idx-1].set_ylabel(r"Pressure $P$")
+            ax3[plot_idx-1].legend()
 
         # Increment plot index
         plot_idx += 1
+
+if sine_flag:
+    # Plot the interface position at x = N/4
+    fig4, ax4 = plt.subplots(figsize=(12, 9))
+    ax4.plot(t_plot, h_quarter)
+    ax4.set_title(r"Interface $h$ at $x=N/4$")
+    ax4.set_xlabel(r"Time $t$")
+    ax4.set_ylabel(r"Vertical position $Y$")
+
+else:
+    # Print final value of the surface tension
+    print(f"Final value of sigma = {sigma[-1]:.2e}")
     
-print(f"Final value of sigma = {sigma[-1]:.2e}")
+    # Fix pressure plot
+    ax3[-1].set_xlabel(r"Coordinate $x$")
+    ax3[0].set_title(r"Pressure along $x$ axis at $y=M/2$")
 
-# Fix pressure plot
-ax3[-1].set_xlabel(r"Coordinate $x$")
-ax3[0].set_title(r"Pressure along $x$ axis at $y=M/2$")
-
-
-fig4, ax4 = plt.subplots(nrows=1, ncols=2, figsize=(12, 9))
-ax4[0].plot(t_plot, pressure_diff)
-ax4[0].set_title("Pressure Difference")
-ax4[1].plot(t_plot, sigma)
-ax4[1].set_title("Surface Tension")
+    # Plot pressure difference and surface tension
+    fig4, ax4 = plt.subplots(nrows=2, ncols=1, figsize=(12, 9), sharex=True)
+    ax4[0].plot(t_plot, pressure_diff)
+    ax4[0].set_title("Pressure Difference")
+    ax4[1].plot(t_plot, sigma)
+    ax4[1].set_title("Surface Tension")
+    ax4[1].set_xlabel(r"Time $t$")
 
 plt.show()
-
-# from IPython import embed;embed()
