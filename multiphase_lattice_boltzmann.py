@@ -1,16 +1,19 @@
-import matplotlib
 import numpy             as np
 import matplotlib.pyplot as plt
 
+#------------------------------------#
+#-----------INITIALIZATION-----------#
+#------------------------------------#
 # Constants
 N = 150
 omega = 1.8
 A = 0.05
 beta = 0.5
 Ndir = 9
-k   = 2*np.pi/N # Frequency
+n = 1
+k   = 2*np.pi*n/N # Frequency
 idx = np.arange(Ndir)
-num_timesteps = 10000
+num_timesteps = 100
 
 t_plot   = np.arange(num_timesteps)
 sigma    = np.array([0]*num_timesteps, dtype=np.float64)
@@ -33,42 +36,49 @@ outside = (X - (N-1)/2)**2 + (Y - (N-1)/2)**2 >  (N/10)**2
 Ri   = np.zeros((N, N, Ndir), dtype=np.float64)
 Bi   = np.zeros((N, N, Ndir), dtype=np.float64)
 
-# Red fluid circle in center, blue fluid outside
-# Ri[circle,  :] = 1
-# Bi[outside, :] = 1
-
-# Red fluid at bottom, blue fluid on top
 sine_flag = 1
-Ri[np.where(Y >= N/2 + 10*N/150*np.sin(k*X))] = 1
-Bi[np.where(Y < N/2 + 10*N/150*np.sin(k*X))] = 1
+
+if sine_flag:
+    # Red fluid at bottom, blue fluid on top
+    Ri[np.where(Y >= N/2 + 10*int(N/150)*np.sin(k*X))] = 1
+    Bi[np.where(Y < N/2 + 10*int(N/150)*np.sin(k*X))] = 1
+
+else:
+    # Red fluid circle in center, blue fluid outside
+    Ri[circle,  :] = 1
+    Bi[outside, :] = 1
 
 # Total population
 Ni = Ri+Bi
 
-# Create plot for initial condition and final distribution
-# fig1, ax1 = plt.subplots(nrows=1, ncols=2, layout='constrained')
-# ax1[0].set_title("Initial Condition")
-# im1 = ax1[0].imshow(Ri.sum(axis=2))
-# im2 = ax1[0].imshow(Bi.sum(axis=2))
-# plt.show()
+Ni_eq      = np.zeros_like(Ni)
+color_term = np.zeros_like(Ni)
+cos_phi    = np.zeros_like(Ni)
 
 # Create plot for visualizing the distribtuion at different times
 fig2, ax2 = plt.subplots(nrows=2, ncols=2, figsize=(12, 9), layout='constrained')
 ax2 = ax2.flatten()
-ax2[0].set_title("Initial Condition")
+ax2[0].set_title("Initial Condition", fontsize=35)
 RGB = np.zeros((N, N, 3))
 R_summed = Ri.sum(axis=2)
 B_summed = Bi.sum(axis=2)
 RGB[:, :, 0] = R_summed
 RGB[:, :, 2] = B_summed
 im = ax2[0].imshow(RGB)
-plot_times = [int(num_timesteps/3), int(num_timesteps*2/3), num_timesteps-1]
-plot_idx = 1
+plot_times = [1, int(num_timesteps*1/3), int(num_timesteps*2/3), num_timesteps]
+plot_idx = 0
+[ax2[i].tick_params(axis='both', labelsize=17) for i in range(len(plot_times))]
+[ax2[i].set_xticks([0, int(N/5), int(2*N/5), int(3*N/5), int(4*N/5), N-1]) for i in range(len(plot_times))]
+[ax2[i].set_yticks([0, int(N/5), int(2*N/5), int(3*N/5), int(4*N/5), N-1]) for i in range(len(plot_times))]
+[ax2[i].invert_yaxis() for i in range(len(plot_times))]
 
 # Create plot for visualizing the centerline pressure at different times
-fig3, ax3 = plt.subplots(nrows=3, ncols=1, figsize=(12, 9), sharex=True, layout='constrained')
+fig3, ax3 = plt.subplots(nrows=4, ncols=1, figsize=(12, 9), sharex=True, layout='constrained')
 
-## Utility functions
+
+#-----------------------------------#
+#---------UTILITY FUNCTIONS---------#
+#-----------------------------------#
 
 def calc_color_gradient(Ri, Bi):
     # Color gradient components
@@ -126,7 +136,6 @@ def find_interface(Ri, Bi, quarter=False):
     if not quarter:
         interface_y = np.zeros((N, 1))
         for i in range(N):
-            # from IPython import embed;embed()
             red_sum  = Ri[:, i, :].sum(axis=1)
             blue_sum = Bi[:, i, :].sum(axis=1)
             diff = red_sum - blue_sum
@@ -139,28 +148,26 @@ def find_interface(Ri, Bi, quarter=False):
             interface_y[i] = Y[int_idx, i]
         
         return interface_y
+
     else:
         i = int(N/4)
-        red_sum = Ri[:, i, :].sum(axis=1)
+        red_sum  = Ri[:, i, :].sum(axis=1)
         blue_sum = Bi[:, i, :].sum(axis=1)
-        diff = red_sum - blue_sum
+        diff = -(red_sum - blue_sum)
         int_idx = 0
-    
-        for j in range(len(diff)):
-            if diff[j] < 0 and diff[j+1] > 0:
+        for j in range(1, len(diff)):
+            if diff[j-1] < 0 and diff[j] > 0:
                 int_idx = j
-                break
                 
-        return Y[int_idx, i]
-        
+                return Y[int_idx, i]
+                
         
 
-Ni_eq      = np.zeros_like(Ni)
-color_term = np.zeros_like(Ni)
-cos_phi    = np.zeros_like(Ni)
+#-----------------------------------#
+#--------SIMULATION TIMELOOP--------#
+#-----------------------------------#
 
-# Timeloop
-for t in range(num_timesteps):
+for t in range(1, num_timesteps+1):
     print(f"t = {t}")
 
     # Calculate fluid variables
@@ -223,81 +230,98 @@ for t in range(num_timesteps):
     
     if sine_flag:
         # Store interface at x = N/4
-        h_quarter[t] = find_interface(Ri, Bi, quarter=True)
+        h_quarter[t-1] = find_interface(Ri, Bi, quarter=True)
 
 
     else:
         # Calculate pressure difference over the droplet
         P = rho/3
-        idx_center  = int((N-1)/2)
-        idx_outside = 0
-        P_center  = P[idx_center, idx_center]
-        P_outside = P[idx_outside, idx_outside]
+        idx_center_x  = 70
+        idx_center_y  = int(N/2)
+        idx_outside_x = 50
+        idx_outside_y = int(N/2)
+        P_center  = P[idx_center_y, idx_center_x]
+        P_outside = P[idx_outside_y, idx_outside_x]
         delta_P = P_center - P_outside
-        dist = np.sqrt((X[idx_outside, idx_outside] - X[idx_center, idx_center])**2 + (Y[idx_outside, idx_outside] - Y[idx_center, idx_center])**2)
-        sigma[t] = delta_P*dist
-        pressure_diff[t] = delta_P
+        dist = np.sqrt((X[idx_outside_y, idx_outside_x] - X[idx_center_y, idx_center_x])**2 + (Y[idx_outside_y, idx_outside_x] - Y[idx_center_y, idx_center_x])**2)
+        sigma[t-1] = delta_P*dist
+        pressure_diff[t-1] = delta_P
+        if np.isclose(t, 25000):
+            from IPython import embed;embed()
 
     # Visualize
     if t in plot_times:
-        # Plot the particle distribution
-        ax2[plot_idx].set_title(f"Time t = {t}")
+        if t != 0:
+            # Plot the particle distribution
+            ax2[plot_idx].set_title(rf"Time $t = {t}$", fontsize=35)
 
-        # Create RGB array for plotting
-        RGB = np.zeros((N, N, 3))
-        R_summed = Ri.sum(axis=2)
-        if np.max(R_summed) != 0:
-            R_summed = R_summed[:, :]*1.0/np.max(R_summed)
+            # Create RGB array for plotting
+            RGB = np.zeros((N, N, 3))
+            R_summed = Ri.sum(axis=2)
+            if np.max(R_summed) != 0:
+                R_summed = R_summed[:, :]*1.0/np.max(R_summed)
 
-        B_summed = Bi.sum(axis=2)
-        max_B = np.max(B_summed)
-        if np.max(B_summed) != 0:
-            B_summed = B_summed[:, :]*1.0/np.max(B_summed)
-        
-        RGB[:, :, 0] = R_summed
-        RGB[:, :, 2] = B_summed
-        im = ax2[plot_idx].imshow(RGB)
+            B_summed = Bi.sum(axis=2)
+            max_B = np.max(B_summed)
+            if np.max(B_summed) != 0:
+                B_summed = B_summed[:, :]*1.0/np.max(B_summed)
+            
+            RGB[:, :, 0] = R_summed
+            RGB[:, :, 2] = B_summed
+            im = ax2[plot_idx].imshow(RGB)
 
+    
         # If sine wave case, plot the interface
         if sine_flag:
-            h = find_interface(Ri, Bi)
-            ax3[plot_idx-1].plot(X[0, :], h.flatten(), label=f"Time $t={t}$")
-            ax3[plot_idx-1].set_ylabel(r"Interface position $h$")
-            ax3[plot_idx-1].legend()
+            h = find_interface(Ri, Bi, quarter=False)
+            ax3[plot_idx].plot(X[0, :], h.flatten(), label=rf"Time $t={t}$")
+            ax3[plot_idx].legend(fontsize=20)
 
         # If circle case, plot the centerline pressure
         else:
             # Plot the centerline pressure
             P_half = P[int(N/2), :]
-            ax3[plot_idx-1].plot(X[int(N/2), :], P_half, label=f"Time $t={t}$")
-            ax3[plot_idx-1].set_ylabel(r"Pressure $P$")
-            ax3[plot_idx-1].legend()
+            ax3[plot_idx].plot(X[int(N/2), :], P_half, label=rf"Time $t={t}$")
+            ax3[plot_idx].set_ylabel(r"Pressure $P$", fontsize=25)
+            ax3[plot_idx].legend(fontsize=20)
 
         # Increment plot index
         plot_idx += 1
 
 if sine_flag:
+    ax3[1].set_ylabel(r"Interface position $h$", fontsize=25)
+    ax3[-1].set_xlabel(r"Coordinate $x$", fontsize=25)
+    ax3[-1].tick_params(axis='x', labelsize=17)
+    [ax3[i].tick_params(axis='y', labelsize=17) for i in range(len(plot_times))]
+    [ax3[i].invert_xaxis() for i in range(len(plot_times))]
+    #[ax3[i].invert_yaxis() for i in range(len(plot_times))]
     # Plot the interface position at x = N/4
     fig4, ax4 = plt.subplots(figsize=(12, 9))
     ax4.plot(t_plot, h_quarter)
-    ax4.set_title(r"Interface $h$ at $x=N/4$")
-    ax4.set_xlabel(r"Time $t$")
-    ax4.set_ylabel(r"Vertical position $Y$")
+    ax4.set_title(r"Interface $h$ at $x=N/4$", fontsize=35)
+    ax4.set_xlabel(r"Time $t$", fontsize=25)
+    ax4.set_ylabel(r"Vertical position $y$", fontsize=25)
+    #ax4.invert_yaxis()
+    ax4.tick_params(axis='both', labelsize=17)
 
 else:
     # Print final value of the surface tension
     print(f"Final value of sigma = {sigma[-1]:.2e}")
     
     # Fix pressure plot
-    ax3[-1].set_xlabel(r"Coordinate $x$")
-    ax3[0].set_title(r"Pressure along $x$ axis at $y=M/2$")
+    ax3[-1].set_xlabel(r"Coordinate $x$", fontsize=25)
+    ax3[-1].tick_params(axis='x', labelsize=17)
+    [ax3[i].tick_params(axis='y', labelsize=17) for i in range(len(plot_times))]
+    [ax3[i].invert_xaxis() for i in range(len(plot_times))]
+    #[ax3[i].invert_yaxis() for i in range(len(plot_times))]
+    ax3[0].set_title(r"Pressure along $x$ axis at $y=M/2$", fontsize=35)
 
     # Plot pressure difference and surface tension
     fig4, ax4 = plt.subplots(nrows=2, ncols=1, figsize=(12, 9), sharex=True)
     ax4[0].plot(t_plot, pressure_diff)
-    ax4[0].set_title("Pressure Difference")
+    ax4[0].set_title("Pressure Difference", fontsize=35)
     ax4[1].plot(t_plot, sigma)
-    ax4[1].set_title("Surface Tension")
-    ax4[1].set_xlabel(r"Time $t$")
+    ax4[1].set_title("Surface Tension", fontsize=35)
+    ax4[1].set_xlabel(r"Time $t$", fontsize=25)
 
 plt.show()
