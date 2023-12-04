@@ -10,10 +10,10 @@ omega = 1.8
 A = 0.05
 beta = 0.5
 Ndir = 9
-n = 1
+n = 4
 k   = 2*np.pi*n/N # Frequency
 idx = np.arange(Ndir)
-num_timesteps = 100
+num_timesteps = 15000
 
 t_plot   = np.arange(num_timesteps)
 sigma    = np.array([0]*num_timesteps, dtype=np.float64)
@@ -62,15 +62,13 @@ ax2[0].set_title("Initial Condition", fontsize=35)
 RGB = np.zeros((N, N, 3))
 R_summed = Ri.sum(axis=2)
 B_summed = Bi.sum(axis=2)
-RGB[:, :, 0] = R_summed
-RGB[:, :, 2] = B_summed
+R_idx = 2 if sine_flag else 0
+B_idx = 0 if sine_flag else 2
+RGB[:, :, R_idx] = R_summed
+RGB[:, :, B_idx] = B_summed
 im = ax2[0].imshow(RGB)
 plot_times = [1, int(num_timesteps*1/3), int(num_timesteps*2/3), num_timesteps]
 plot_idx = 0
-[ax2[i].tick_params(axis='both', labelsize=17) for i in range(len(plot_times))]
-[ax2[i].set_xticks([0, int(N/5), int(2*N/5), int(3*N/5), int(4*N/5), N-1]) for i in range(len(plot_times))]
-[ax2[i].set_yticks([0, int(N/5), int(2*N/5), int(3*N/5), int(4*N/5), N-1]) for i in range(len(plot_times))]
-[ax2[i].invert_yaxis() for i in range(len(plot_times))]
 
 # Create plot for visualizing the centerline pressure at different times
 fig3, ax3 = plt.subplots(nrows=4, ncols=1, figsize=(12, 9), sharex=True, layout='constrained')
@@ -153,13 +151,14 @@ def find_interface(Ri, Bi, quarter=False):
         i = int(N/4)
         red_sum  = Ri[:, i, :].sum(axis=1)
         blue_sum = Bi[:, i, :].sum(axis=1)
-        diff = -(red_sum - blue_sum)
+        diff = red_sum - blue_sum
         int_idx = 0
         for j in range(1, len(diff)):
             if diff[j-1] < 0 and diff[j] > 0:
                 int_idx = j
-                
-                return Y[int_idx, i]
+                break
+        
+        return Y[int_idx, i]
                 
         
 
@@ -174,8 +173,6 @@ for t in range(1, num_timesteps+1):
     rho = np.sum(Ni, axis=2) # Density
     ux  = np.sum(Ni*ex, axis=2) / rho # x velocity
     uy  = np.sum(Ni*ey, axis=2) / rho # y velocity
-    # if t == 0:
-    #     uy = 0.5e-3*np.ones_like(uy)
 
     # Compute color gradient
     fx, fy = calc_color_gradient(Ri, Bi)
@@ -186,7 +183,7 @@ for t in range(1, num_timesteps+1):
     fnorm_nzero_idx = np.invert(np.isclose(f_norm, 0.0))
     fx_hat[fnorm_nzero_idx] /= f_norm[fnorm_nzero_idx]
     fy_hat[fnorm_nzero_idx] /= f_norm[fnorm_nzero_idx]
-    
+    # from IPython import embed;embed()
     # Compute Ni_eq and the color gradient term
     for i, cx, cy, wi in zip(idx, ex, ey, weights):
         # Equilibrium distribution
@@ -236,18 +233,18 @@ for t in range(1, num_timesteps+1):
     else:
         # Calculate pressure difference over the droplet
         P = rho/3
-        idx_center_x  = 70
+        idx_center_x  = int(N/2)
         idx_center_y  = int(N/2)
-        idx_outside_x = 50
+        idx_outside_x = 0
         idx_outside_y = int(N/2)
         P_center  = P[idx_center_y, idx_center_x]
         P_outside = P[idx_outside_y, idx_outside_x]
         delta_P = P_center - P_outside
-        dist = np.sqrt((X[idx_outside_y, idx_outside_x] - X[idx_center_y, idx_center_x])**2 + (Y[idx_outside_y, idx_outside_x] - Y[idx_center_y, idx_center_x])**2)
+        dist = 15
         sigma[t-1] = delta_P*dist
         pressure_diff[t-1] = delta_P
-        if np.isclose(t, 25000):
-            from IPython import embed;embed()
+        # if np.isclose(t, 25000):
+        #     from IPython import embed;embed()
 
     # Visualize
     if t in plot_times:
@@ -266,8 +263,8 @@ for t in range(1, num_timesteps+1):
             if np.max(B_summed) != 0:
                 B_summed = B_summed[:, :]*1.0/np.max(B_summed)
             
-            RGB[:, :, 0] = R_summed
-            RGB[:, :, 2] = B_summed
+            RGB[:, :, R_idx] = R_summed
+            RGB[:, :, B_idx] = B_summed
             im = ax2[plot_idx].imshow(RGB)
 
     
@@ -282,14 +279,19 @@ for t in range(1, num_timesteps+1):
             # Plot the centerline pressure
             P_half = P[int(N/2), :]
             ax3[plot_idx].plot(X[int(N/2), :], P_half, label=rf"Time $t={t}$")
-            ax3[plot_idx].set_ylabel(r"Pressure $P$", fontsize=25)
             ax3[plot_idx].legend(fontsize=20)
 
         # Increment plot index
         plot_idx += 1
 
+
+[ax2[i].tick_params(axis='both', labelsize=17) for i in range(len(plot_times))]
+[ax2[i].set_xticks([0, int(N/5), int(2*N/5), int(3*N/5), int(4*N/5), N-1]) for i in range(len(plot_times))]
+[ax2[i].set_yticks([0, int(N/5), int(2*N/5), int(3*N/5), int(4*N/5), N-1]) for i in range(len(plot_times))]
+[ax2[i].invert_yaxis() for i in range(len(plot_times))]
+
 if sine_flag:
-    ax3[1].set_ylabel(r"Interface position $h$", fontsize=25)
+    fig3.supylabel(r"Interface position $h$", fontsize=25)
     ax3[-1].set_xlabel(r"Coordinate $x$", fontsize=25)
     ax3[-1].tick_params(axis='x', labelsize=17)
     [ax3[i].tick_params(axis='y', labelsize=17) for i in range(len(plot_times))]
@@ -309,6 +311,7 @@ else:
     print(f"Final value of sigma = {sigma[-1]:.2e}")
     
     # Fix pressure plot
+    fig3.supylabel(r"Pressure $P$", fontsize=25)
     ax3[-1].set_xlabel(r"Coordinate $x$", fontsize=25)
     ax3[-1].tick_params(axis='x', labelsize=17)
     [ax3[i].tick_params(axis='y', labelsize=17) for i in range(len(plot_times))]
@@ -317,11 +320,16 @@ else:
     ax3[0].set_title(r"Pressure along $x$ axis at $y=M/2$", fontsize=35)
 
     # Plot pressure difference and surface tension
-    fig4, ax4 = plt.subplots(nrows=2, ncols=1, figsize=(12, 9), sharex=True)
-    ax4[0].plot(t_plot, pressure_diff)
-    ax4[0].set_title("Pressure Difference", fontsize=35)
-    ax4[1].plot(t_plot, sigma)
-    ax4[1].set_title("Surface Tension", fontsize=35)
-    ax4[1].set_xlabel(r"Time $t$", fontsize=25)
+    # fig4, ax4 = plt.subplots(nrows=2, ncols=1, figsize=(12, 9), sharex=True)
+    # ax4[0].plot(t_plot, pressure_diff)
+    # ax4[0].set_title("Pressure Difference", fontsize=35)
+    # ax4[1].plot(t_plot, sigma)
+    # ax4[1].set_title("Surface Tension", fontsize=35)
+    # ax4[1].set_xlabel(r"Time $t$", fontsize=25)
+    fig4, ax4 = plt.subplots()
+    ax4.plot(t_plot, sigma)
+    ax4.set_xlabel(r"Time $t$", fontsize=25)
+    ax4.set_ylabel(r"Surface Tension $\sigma$", fontsize=25)
+    ax4.tick_params(axis='both', labelsize=17)
 
 plt.show()
